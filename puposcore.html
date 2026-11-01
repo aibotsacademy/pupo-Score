@@ -301,6 +301,22 @@ details.cat-details .checks{margin-top:8px}
 .field select{width:100%;padding:12px 14px;border-radius:12px;background:rgba(5,11,29,.6);border:1px solid var(--line-strong);color:var(--white);outline:0;font-size:15px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#A8BCD0 50%),linear-gradient(135deg,#A8BCD0 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat}
 .field select option{background:#071B33}
 .iq{padding-top:40px;padding-bottom:80px;max-width:760px}
+.scan-strip{margin-bottom:18px;padding:14px 16px;border-radius:16px;background:rgba(10,30,58,.55);border:1px solid var(--line);backdrop-filter:blur(12px)}
+.scan-strip.done{border-color:rgba(52,224,161,.35)}
+.scan-strip.failed{border-color:rgba(255,92,122,.45);background:rgba(255,92,122,.07)}
+.ss-row{display:flex;align-items:center;gap:14px}
+.ss-ring{--p:0;width:44px;height:44px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;background:radial-gradient(closest-side,#0a1e3a 79%,transparent 80% 100%),conic-gradient(var(--cyan) calc(var(--p)*1%),rgba(168,188,208,.15) 0)}
+.scan-strip.done .ss-ring{color:var(--pass);background:radial-gradient(closest-side,#0a1e3a 79%,transparent 80% 100%),conic-gradient(var(--pass) 100%,transparent 0)}
+.ss-ico{width:30px;height:30px;flex:none;border-radius:50%;display:grid;place-items:center;font-weight:800;color:var(--fail);border:1.5px solid var(--fail)}
+.ss-txt{display:grid;gap:2px;min-width:0}
+.ss-txt b{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.ss-txt span{font-size:12.5px;color:var(--muted)}
+.ss-bar{height:3px;border-radius:3px;background:rgba(168,188,208,.12);margin-top:12px;overflow:hidden}
+.ss-bar i{display:block;height:100%;background:var(--grad);transition:width .6s var(--ease)}
+.scan-strip.done .ss-bar{display:none}
+.ss-fix{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.ss-fix input{flex:1;min-width:200px;padding:11px 13px;border-radius:12px;background:rgba(5,11,29,.6);border:1px solid var(--line-strong);color:var(--white);font-size:15px;outline:0}
+.ss-fix .btn{padding:10px 14px;font-size:14px}
 .iq-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
 .iq-top .sec{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--cyan);text-transform:uppercase}
 .iq-top .cnt{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -398,7 +414,7 @@ details.cat-details .checks{margin-top:8px}
         </button>
       </form>
       <div class="form-error" id="form-error" role="alert"></div>
-      <p class="supporting">Diagnóstico inicial gratuito. No requiere acceso a tu sitio web.</p>
+      <p class="supporting">Diagnóstico inicial gratuito. No requiere acceso a tu sitio web.<br>Mientras analizamos tu sitio, te haremos unas preguntas rápidas sobre tu clínica.</p>
       <div class="backend-note" id="backend-note">El servidor de análisis no está disponible en este momento. <button type="button" data-demo>Ver una demostración con datos simulados</button>.</div>
       <div class="pillars" aria-label="Qué evaluamos">
         <div class="pillar"><span class="w">25%</span><b>Indexabilidad técnica</b><p>¿Pueden los buscadores encontrar y leer tu sitio?</p></div>
@@ -436,6 +452,7 @@ details.cat-details .checks{margin-top:8px}
   <section id="view-loading" class="view"><div class="wrap loading-view"><div class="spinner"></div>Cargando informe…</div></section>
   <section id="view-integral" class="view" aria-live="polite">
     <div class="wrap iq">
+      <div class="scan-strip" id="scan-strip" hidden></div>
       <div class="iq-top"><span class="sec" id="iq-sec"></span><span class="cnt" id="iq-cnt"></span></div>
       <div class="iq-sections" aria-hidden="true"><span><i></i></span><span><i></i></span><span><i></i></span><span><i></i></span><span><i></i></span><span><i></i></span></div>
       <div class="card iq-card" id="iq-card"></div>
@@ -561,28 +578,97 @@ function setProgress(p) {
   $('#mini-bar').style.strokeDashoffset = String(263.9 * (1 - p / 100));
 }
 
-async function startScan(url) {
+/**
+ * New flow: the site scan runs in the background while the clinic answers the integral
+ * diagnosis. Results are revealed only after the questionnaire, already combined.
+ */
+function startScan(url) {
   state.cancelled = false; state.demo = false; state.report = null; state.pdfDriveUrl = '';
-  $('#scan-domain').textContent = new URL(url).hostname;
-  $('#scan-error').style.display = 'none';
-  $('#cancel-btn').hidden = false;
-  renderSteps(STEP_LABELS.map((label, i) => ({ label, status: i === 0 ? 'running' : 'pending' })));
-  setProgress(0);
-  show('scan');
+  const token = (state.scanToken = (state.scanToken || 0) + 1);
+  state.scan = { url, domain: new URL(url).hostname, status: 'running', progress: 0, step: STEP_LABELS[0], error: '', offerDemo: false, token };
+  // fresh questionnaire for a new site
+  IQ.i = 0; IQ.answers = {}; IQ.busy = false; IQ.from = 'hero';
+  IQ.contact = { website: url };
+  show('integral');
+  renderIQ('enter');
+  renderScanStrip();
+  state.scanRun = runScan(url, token);
+}
+
+async function runScan(url, token) {
+  const alive = () => !state.cancelled && state.scan && state.scan.token === token;
   try {
     let s = await api('createAudit', { url });
-    while (!state.cancelled) {
-      const steps = s.steps.map((x, i) => ({ ...x, status: s.status !== 'done' && x.status === 'pending' && i === s.steps.findIndex((y) => y.status === 'pending') ? 'running' : x.status }));
-      renderSteps(steps);
-      setProgress(s.progress);
-      if (s.status === 'done') { setTimeout(() => renderReport(s.report, false), 500); return; }
+    while (alive()) {
+      state.scan.progress = s.progress;
+      const next = s.steps.find((x) => x.status === 'pending' || x.status === 'running');
+      state.scan.step = next ? next.label : 'Análisis completado';
+      if (s.status === 'done') {
+        state.scan.status = 'done'; state.scan.progress = 100; state.scan.report = s.report; state.report = s.report;
+        prefillFromReport(s.report);
+        renderScanStrip();
+        return s.report;
+      }
+      renderScanStrip();
       s = await withRetry(() => api('auditStep', { id: s.id }));
     }
   } catch (e) {
-    if (state.cancelled) return;
-    scanFailed(e.message || 'No fue posible completar el análisis.', ['NETWORK', 'NO_BACKEND'].includes(e.code));
+    if (!alive()) return null;
+    state.scan.status = 'failed';
+    state.scan.error = e.message || 'No fue posible analizar el sitio.';
+    state.scan.offerDemo = ['NETWORK', 'NO_BACKEND'].includes(e.code);
+    renderScanStrip();
   }
+  return null;
 }
+
+function prefillFromReport(r) {
+  const fx = r.facts || {}, ins = r.insights || {};
+  const fill = (k, v) => {
+    if (!v || IQ.contact[k]) return;
+    IQ.contact[k] = v;
+    const el = document.querySelector(`#iq-form [name="${k}"]`);
+    if (el && !el.value) el.value = v;
+  };
+  fill('clinic', ins.clinicName && ins.clinicName !== r.domain ? ins.clinicName : '');
+  fill('city', fx.city || '');
+}
+
+function renderScanStrip() {
+  const el = $('#scan-strip'), sc = state.scan;
+  if (!el) return;
+  if (!sc) { el.hidden = true; return; }
+  el.hidden = false;
+  el.className = 'scan-strip ' + sc.status;
+  if (sc.status === 'failed') {
+    el.innerHTML = `<div class="ss-row"><span class="ss-ico">!</span><div class="ss-txt"><b>No pudimos analizar ${esc(sc.domain)}</b><span>${esc(sc.error)} Corrige la dirección; tus respuestas se conservan.</span></div></div>
+      <form class="ss-fix" id="ss-fix"><input id="ss-url" value="${esc(sc.url)}" inputmode="url" autocapitalize="off" spellcheck="false" aria-label="Sitio web de tu clínica"><button class="btn btn-ghost" type="submit">Analizar de nuevo</button>${sc.offerDemo ? '<button class="btn btn-ghost" type="button" data-demo-integral>Usar demostración</button>' : ''}</form>`;
+    return;
+  }
+  const p = Math.round(sc.progress || 0);
+  el.innerHTML = `<div class="ss-row"><span class="ss-ring" style="--p:${sc.status === 'done' ? 100 : p}">${sc.status === 'done' ? '✓' : p + '%'}</span>
+    <div class="ss-txt"><b>${sc.status === 'done' ? 'Análisis de ' + esc(sc.domain) + ' listo' : 'Analizando ' + esc(sc.domain) + ' en segundo plano'}</b>
+    <span>${sc.status === 'done' ? 'Lo verás junto con tu diagnóstico integral al terminar.' : esc(sc.step) + '… mientras tanto, cuéntanos sobre tu clínica.'}</span></div></div>
+    <div class="ss-bar"><i style="width:${sc.status === 'done' ? 100 : Math.max(4, p)}%"></i></div>`;
+}
+
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'ss-fix') return;
+  e.preventDefault();
+  const url = normalize($('#ss-url').value);
+  if (!url) { toast('Ingresa una dirección válida, por ejemplo https://www.tuclinica.com'); return; }
+  const token = (state.scanToken = (state.scanToken || 0) + 1);
+  state.scan = { url, domain: new URL(url).hostname, status: 'running', progress: 0, step: STEP_LABELS[0], token };
+  IQ.contact.website = url;
+  renderScanStrip();
+  state.scanRun = runScan(url, token);
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-demo-integral]')) return;
+  state.demo = true; state.scan.status = 'done'; state.scan.demo = true; state.report = demoReport(false);
+  renderScanStrip();
+  toast('Modo demostración: el informe usará datos simulados.');
+});
 /** Retry a phase on transient network failures (a phase is safe to repeat: state is saved only when it completes). */
 async function withRetry(fn, tries = 3) {
   for (let i = 0; ; i++) {
@@ -603,7 +689,7 @@ function scanFailed(msg, offerDemo) {
 }
 $('#cancel-btn').addEventListener('click', () => { state.cancelled = true; show('hero'); });
 $('#retry-btn').addEventListener('click', () => { show('hero'); setTimeout(() => $('#url').focus(), 300); });
-$('#home-link').addEventListener('click', (e) => { e.preventDefault(); state.cancelled = true; show('hero'); });
+$('#home-link').addEventListener('click', (e) => { e.preventDefault(); state.cancelled = true; state.scan = null; show('hero'); });
 
 /* ---------------------------------------------------------------- report */
 const stChip = (s) => `<span class="st ${esc(s)}">${esc(STATUS[s] || s)}</span>`;
@@ -879,6 +965,8 @@ const answeredCount = () => QUESTIONS.filter((q) => q.type !== 'contact' && IQ.a
 const modScore = (a) => (a && a.s !== null && a.s !== undefined ? Number(a.s) : null);
 
 function openWizard() {
+  IQ.from = 'report';
+  state.scan = null; renderScanStrip();
   if (state.report) {
     const fx = state.report.facts || {}, ins = state.report.insights || {};
     IQ.contact.website = IQ.contact.website || state.report.finalUrl || `https://${state.report.domain}`;
@@ -909,7 +997,7 @@ function renderIQ(dir) {
   card.onchange = null;
   void card.offsetWidth;
   const sub = `${esc(SECTIONS[q.sec])}${q.module ? ` · proceso ${QUESTIONS.filter((x) => x.module).indexOf(q) + 1} de 12` : ''}${q.multi ? ' · selección múltiple' : ''}`;
-  const nav = (enabled) => `<div class="iq-nav"><button class="btn btn-ghost" type="button" id="iq-back">← ${IQ.i === 0 ? 'Volver al informe' : 'Atrás'}</button><button class="btn btn-primary" type="button" id="iq-next" ${enabled ? '' : 'disabled'}>Continuar</button></div>`;
+  const nav = (enabled) => `<div class="iq-nav"><button class="btn btn-ghost" type="button" id="iq-back">← ${IQ.i === 0 ? (IQ.from === 'report' ? 'Volver al informe' : 'Cambiar sitio') : 'Atrás'}</button><button class="btn btn-primary" type="button" id="iq-next" ${enabled ? '' : 'disabled'}>Continuar</button></div>`;
   if (q.type === 'contact') card.innerHTML = contactCard(q);
   else if (q.multi) {
     const a = IQ.answers[q.id], chosen = a ? a.items.map((x) => x.v) : [], otherTxt = a ? (a.items.find((x) => x.v === OTHER) || {}).text || '' : '';
@@ -991,7 +1079,7 @@ function renderIQ(dir) {
     $('#iq-next').addEventListener('click', () => goIQ(1));
     if (!isMobile() && !isOther) setTimeout(() => sel.focus({ preventScroll: true }), 60);
   }
-  $('#iq-back').addEventListener('click', () => (IQ.i === 0 ? show('report') : goIQ(-1)));
+  $('#iq-back').addEventListener('click', () => { if (IQ.i > 0) return goIQ(-1); if (IQ.from === 'report') return show('report'); state.cancelled = true; state.scan = null; show('hero'); setTimeout(() => $('#url').focus(), 300); });
   renderLive(); renderAnswers();
 }
 
@@ -1122,7 +1210,23 @@ async function submitIntegral(f) {
   state.contact = payload.contact;
   IQ.busy = true;
   headIQ(QUESTIONS[IQ.i]);
-  $('#iq-card').innerHTML = `<div class="iq-done"><div class="spinner"></div><h3>Generando tu diagnóstico integral</h3><p class="help">Estamos cruzando la visibilidad digital de tu clínica con tus ${answeredCount()} respuestas.</p></div>`;
+  const waitCard = (title, sub) => { $('#iq-card').innerHTML = `<div class="iq-done"><div class="spinner"></div><h3>${title}</h3><p class="help" id="iq-wait-sub">${sub}</p></div>`; };
+  // The site scan may still be running: wait for it before revealing anything.
+  if (state.scan && state.scan.status === 'running') {
+    waitCard('Terminando el análisis de tu sitio', `${esc(state.scan.step)} · ${Math.round(state.scan.progress)}%`);
+    const tick = setInterval(() => { const el = $('#iq-wait-sub'); if (el && state.scan) el.textContent = `${state.scan.step} · ${Math.round(state.scan.progress)}%`; }, 500);
+    await state.scanRun;
+    clearInterval(tick);
+  }
+  if (state.scan && state.scan.status === 'failed') {
+    IQ.busy = false;
+    renderIQ('enter');
+    $('#iq-error').textContent = 'Antes de generar el diagnóstico necesitamos analizar tu sitio: corrige la dirección en el recuadro de arriba.';
+    $('#scan-strip').scrollIntoView({ behavior: 'smooth' });
+    return;
+  }
+  payload.auditId = state.demo ? null : state.report && state.report.id;
+  waitCard('Generando tu diagnóstico integral', `Cruzando el análisis de ${esc((state.report && state.report.domain) || 'tu sitio')} con tus ${answeredCount()} respuestas.`);
   try {
     let r;
     if (state.demo) { await new Promise((res) => setTimeout(res, 900)); r = demoReport(true); }
@@ -1132,7 +1236,6 @@ async function submitIntegral(f) {
     }
     IQ.busy = false;
     renderReport(r, state.demo);
-    setTimeout(() => { const o = $('#ops'); if (o) o.scrollIntoView({ behavior: 'smooth' }); }, 500);
     toast('Tu diagnóstico integral está listo. Ya puedes descargarlo o compartirlo.');
   } catch (e) {
     IQ.busy = false;
