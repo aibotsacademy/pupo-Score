@@ -8,7 +8,7 @@
 <meta name="description" content="Diagnóstico gratuito: descubre si el sitio web de tu clínica está preparado para ser encontrado, comprendido y recomendado por buscadores y asistentes de IA.">
 <meta name="theme-color" content="#050B1D">
 <!-- Only needed when this HTML is hosted OUTSIDE Apps Script: paste your Web App /exec URL here. -->
-<meta name="gas-endpoint" content="https://script.google.com/macros/s/AKfycbzH4H5Bgjaw-yUOuccQZf9bUxlLLZuuEFyQtQ9CWTZbZDSjLs6yFrWzfqZGAzfD5ZMcuQ/exec">
+<meta name="gas-endpoint" content="">
 <meta name="plans-url" content="./clinic-ai-plans.html">
 <meta name="privacy-url" content="./politica-de-privacidad.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -340,6 +340,27 @@ details.cat-details .checks{margin-top:8px}
 .dd::after{content:"";position:absolute;right:20px;top:50%;width:9px;height:9px;border-right:2px solid var(--cyan);border-bottom:2px solid var(--cyan);transform:translateY(-70%) rotate(45deg);pointer-events:none}
 .dd.ok select{border-color:rgba(0,229,240,.55)}
 @media (max-width:560px){.dd select{font-size:15px;padding:15px 40px 15px 14px}.lt{padding:10px 14px}.lt .v{font-size:19px}}
+.msd{position:relative}
+.msd-btn{width:100%;min-height:58px;text-align:left;padding:12px 48px 12px 16px;border-radius:14px;background:rgba(5,11,29,.65);border:1.5px solid var(--line-strong);color:var(--white);font:inherit;font-size:16px;cursor:pointer;position:relative;display:flex;align-items:center;transition:border-color .2s,box-shadow .2s}
+.msd-btn::after{content:"";position:absolute;right:20px;top:50%;width:9px;height:9px;border-right:2px solid var(--cyan);border-bottom:2px solid var(--cyan);transform:translateY(-70%) rotate(45deg);transition:transform .2s}
+.msd.open .msd-btn{border-color:var(--cyan);box-shadow:0 0 0 4px rgba(0,229,240,.14);border-bottom-left-radius:6px;border-bottom-right-radius:6px}
+.msd.open .msd-btn::after{transform:translateY(-30%) rotate(-135deg)}
+.msd-btn:focus-visible{outline:0;border-color:var(--cyan);box-shadow:0 0 0 4px rgba(0,229,240,.14)}
+.msd-val{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.msd-val.ph{color:#7387a3}
+.msd-tag{background:rgba(0,229,240,.12);border:1px solid rgba(0,229,240,.4);color:#fff;font-size:13.5px;padding:4px 10px;border-radius:999px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msd-more{font-size:13px;color:var(--cyan);font-weight:700}
+.msd-panel{margin-top:6px;border-radius:14px;background:#0a1e3a;border:1px solid rgba(0,229,240,.35);box-shadow:0 24px 60px -20px rgba(0,0,0,.8);overflow:hidden;animation:fade .2s var(--ease)}
+.msd-list{max-height:300px;overflow-y:auto;padding:6px;overscroll-behavior:contain}
+.msd-opt{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;cursor:pointer;font-size:15px;color:#d7e2ee}
+.msd-opt:hover{background:rgba(255,255,255,.05)}
+.msd-opt input{width:18px;height:18px;margin:0;accent-color:var(--cyan);flex:none;cursor:pointer}
+.msd-opt input:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.msd-opt.on{background:rgba(0,229,240,.09);color:#fff}
+.msd-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);background:rgba(5,11,29,.5)}
+.msd-foot span{font-size:12.5px;color:var(--muted)}
+.msd-foot .btn{padding:9px 18px;font-size:14px}
+@media (max-width:560px){.msd-list{max-height:52vh}.msd-btn{font-size:15px}}
 .cqs{display:flex;flex-wrap:wrap;gap:8px}
 .cq{cursor:pointer;position:relative}
 .cq input{position:absolute;opacity:0;pointer-events:none}
@@ -1001,46 +1022,75 @@ function renderIQ(dir) {
   if (q.type === 'contact') card.innerHTML = contactCard(q);
   else if (q.multi) {
     const a = IQ.answers[q.id], chosen = a ? a.items.map((x) => x.v) : [], otherTxt = a ? (a.items.find((x) => x.v === OTHER) || {}).text || '' : '';
+    const opts = optsOf(q).concat(q.other ? [{ v: OTHER, label: 'Otro (escribir)…' }] : []);
     card.innerHTML = `
-      <span class="qn">${sub}</span><h3 id="iq-q">${esc(q.q)}</h3><p class="help">${esc(q.help || 'Marca todas las que apliquen.')}</p>
-      <div class="cqs" role="group" aria-labelledby="iq-q">
-        ${optsOf(q).map((o) => `<label class="cq"><input type="checkbox" value="${esc(o.v)}" ${chosen.includes(o.v) ? 'checked' : ''}><span>${esc(o.label)}</span></label>`).join('')}
-        ${q.other ? `<label class="cq"><input type="checkbox" value="${OTHER}" ${chosen.includes(OTHER) ? 'checked' : ''}><span>＋ Otro</span></label>` : ''}
+      <span class="qn">${sub}</span><h3 id="iq-q">${esc(q.q)}</h3><p class="help">${esc(q.help || 'Puedes elegir varias opciones.')}</p>
+      <div class="msd" id="msd">
+        <button type="button" class="msd-btn" id="msd-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="iq-q msd-val"><span class="msd-val ph" id="msd-val">Selecciona una o varias</span></button>
+        <div class="msd-panel" id="msd-panel" role="listbox" aria-multiselectable="true" aria-labelledby="iq-q" hidden>
+          <div class="msd-list">
+            ${opts.map((o) => `<label class="msd-opt" role="option" aria-selected="${chosen.includes(o.v)}"><input type="checkbox" value="${esc(o.v)}" ${chosen.includes(o.v) ? 'checked' : ''}><span>${esc(o.label)}</span></label>`).join('')}
+          </div>
+          <div class="msd-foot"><span id="msd-count"></span><button type="button" class="btn btn-primary" id="msd-done">Listo</button></div>
+        </div>
       </div>
       <div class="field other-in" id="iq-other-wrap" ${chosen.includes(OTHER) ? '' : 'hidden'}><input id="iq-other" maxlength="120" placeholder="Escribe cuál (puedes separar varios con comas)" value="${esc(otherTxt)}"></div>
       <div class="iq-picked" id="iq-picked"></div>
       ${nav(false)}`;
+    const boxes = () => $$('#msd-panel input', card);
+    const setOpen = (open) => {
+      $('#msd-panel').hidden = !open;
+      $('#msd').classList.toggle('open', open);
+      $('#msd-btn').setAttribute('aria-expanded', String(open));
+      if (open) { const first = boxes().find((b) => b.checked) || boxes()[0]; if (first && !isMobile()) first.focus({ preventScroll: true }); }
+    };
     const sync = () => {
-      const boxes = $$('.cqs input', card);
-      const checked = boxes.filter((b) => b.checked).map((b) => b.value);
+      const checked = boxes().filter((b) => b.checked).map((b) => b.value);
       const otherOn = checked.includes(OTHER), txt = $('#iq-other').value.trim();
       $('#iq-other-wrap').hidden = !otherOn;
       const valid = checked.length > 0 && (!otherOn || txt.length >= 2);
       $('#iq-next').disabled = !valid;
-      $('#iq-picked').textContent = checked.length ? `✓ ${checked.length} seleccionada(s)${q.max ? ` de máximo ${q.max}` : ''}${otherOn && txt.length < 2 ? ' · escribe la opción “Otro”' : ''}` : '';
+      const labelOf = (v) => (v === OTHER ? (txt ? 'Otro: ' + txt : 'Otro') : optsOf(q).find((o) => o.v === v).label);
+      const names = checked.map(labelOf);
+      const val = $('#msd-val');
+      val.classList.toggle('ph', !names.length);
+      val.innerHTML = names.length ? names.slice(0, 2).map((n) => `<span class="msd-tag">${esc(n)}</span>`).join('') + (names.length > 2 ? `<span class="msd-more">+${names.length - 2}</span>` : '') : 'Selecciona una o varias';
+      $('#msd-count').textContent = `${checked.length} seleccionada(s)${q.max ? ` · máximo ${q.max}` : ''}`;
+      $('#iq-picked').textContent = checked.length ? `✓ ${checked.length} seleccionada(s)${otherOn && txt.length < 2 ? ' · escribe la opción “Otro”' : ' · pulsa Continuar cuando termines'}` : '';
       if (valid) {
-        const items = checked.map((v) => (v === OTHER ? { v: OTHER, label: 'Otro: ' + txt, text: txt } : { v, label: optsOf(q).find((o) => o.v === v).label }));
+        const items = checked.map((v) => (v === OTHER ? { v: OTHER, label: 'Otro: ' + txt, text: txt } : { v, label: labelOf(v) }));
         IQ.answers[q.id] = { multi: true, items, label: items.map((x) => x.label).join(', ') };
       } else delete IQ.answers[q.id];
       renderLive(); renderAnswers(); headIQ(q);
     };
     card.onchange = (e) => {
       const box = e.target;
-      if (box.type !== 'checkbox') return;
-      const boxes = $$('.cqs input', card);
+      if (box.type !== 'checkbox' || !box.closest('#msd-panel')) return;
+      const all = boxes();
       if (box.checked && q.exclusive) {
-        if (box.value === q.exclusive) boxes.forEach((b) => { if (b !== box) b.checked = false; });
-        else boxes.forEach((b) => { if (b.value === q.exclusive) b.checked = false; });
+        if (box.value === q.exclusive) all.forEach((b) => { if (b !== box) b.checked = false; });
+        else all.forEach((b) => { if (b.value === q.exclusive) b.checked = false; });
       }
-      if (box.checked && q.max && boxes.filter((b) => b.checked).length > q.max) { box.checked = false; toast(`Puedes elegir hasta ${q.max} opciones.`, 2200); }
-      box.closest('.cq').classList.toggle('on', box.checked);
-      if (box.value === OTHER && box.checked) setTimeout(() => $('#iq-other').focus(), 50);
+      if (box.checked && q.max && all.filter((b) => b.checked).length > q.max) { box.checked = false; toast(`Puedes elegir hasta ${q.max} opciones.`, 2200); }
+      all.forEach((b) => { b.closest('.msd-opt').classList.toggle('on', b.checked); b.closest('.msd-opt').setAttribute('aria-selected', String(b.checked)); });
+      if (box.value === OTHER && box.checked) { setOpen(false); setTimeout(() => $('#iq-other').focus(), 50); }
       sync();
     };
-    $$('.cqs input', card).forEach((b) => b.closest('.cq').classList.toggle('on', b.checked));
+    boxes().forEach((b) => b.closest('.msd-opt').classList.toggle('on', b.checked));
+    $('#msd-btn').addEventListener('click', () => setOpen($('#msd-panel').hidden));
+    $('#msd-done').addEventListener('click', () => { setOpen(false); $('#iq-next').focus({ preventScroll: true }); });
+    $('#msd-panel').addEventListener('keydown', (e) => {
+      const list = boxes(), i = list.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); $('#msd-btn').focus(); }
+      else if (e.key === 'ArrowDown' && i >= 0) { e.preventDefault(); (list[i + 1] || list[0]).focus(); }
+      else if (e.key === 'ArrowUp' && i >= 0) { e.preventDefault(); (list[i - 1] || list[list.length - 1]).focus(); }
+      else if (e.key === 'Enter' && i >= 0) { e.preventDefault(); list[i].click(); }
+    });
+    IQ.closeMsd = (e) => { const m = $('#msd'); if (m && !m.contains(e.target) && !$('#msd-panel').hidden) setOpen(false); };
     $('#iq-other').addEventListener('input', sync);
     $('#iq-other').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('#iq-next').disabled) { e.preventDefault(); goIQ(1); } });
     sync();
+    if (!chosen.length) setOpen(true);
     $('#iq-next').addEventListener('click', () => goIQ(1));
   } else {
     const a = IQ.answers[q.id], isOther = a && a.v === OTHER;
@@ -1157,6 +1207,7 @@ function renderAnswers() {
   $('#iq-answers-n').textContent = rows.length;
   $('#iq-answers-list').innerHTML = rows.map(({ q, i }) => `<li><button type="button" data-goto="${i}"><span>${esc(q.q)}</span><b>${esc(IQ.answers[q.id].label)}</b></button></li>`).join('');
 }
+document.addEventListener('mousedown', (e) => { if (IQ.closeMsd) IQ.closeMsd(e); });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-goto]');
   if (!b) return;
